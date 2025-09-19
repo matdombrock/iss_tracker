@@ -25,7 +25,7 @@ navigator.geolocation.getCurrentPosition(
   }
 )
 //   https://nominatim.openstreetmap.org/search?q=Paris&format=json&limit=1
-function cityrToLatLong(city) {
+function cityToLatLong(city) {
   fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&limit=1`)
     .then(response => response.json())
     .then(data => {
@@ -192,7 +192,7 @@ setInterval(() => {
 const urlParams = new URLSearchParams(window.location.search);
 const city = urlParams.get('city');
 if (city) {
-  cityrToLatLong(city);
+  cityToLatLong(city);
 }
 
 const scene = createScene();
