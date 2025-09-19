@@ -35,6 +35,7 @@ interface State {
   dataRaw: any | null;
   issMarker: any | null;
   textBlock: any | null;
+  titleBlock: any | null;
 }
 
 let state: State = {
@@ -53,6 +54,7 @@ let state: State = {
   dataRaw: null,
   issMarker: null,
   textBlock: null,
+  titleBlock: null,
 };
 
 //
@@ -168,6 +170,10 @@ class Util {
     }
     scene.onBeforeRenderObservable.add(lerpCamera);
   }
+  trucString(str: string, maxLength: number): string {
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength - 3) + "...";
+  }
 }
 const util = new Util();
 
@@ -241,7 +247,7 @@ const net = new Net();
 class Scene {
   camera(scene: BABYLON.Scene): { camera: BABYLON.ArcRotateCamera, scanline: BABYLON.PostProcess } {
     // Camera
-    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 6, BABYLON.Vector3.Zero(), scene);
+    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 4, BABYLON.Vector3.Zero(), scene);
     // Lower the zoom speed
     camera.wheelDeltaPercentage = 0.01;
     camera.lowerRadiusLimit = 2; // minimum zoom distance
@@ -352,20 +358,38 @@ class Scene {
     state.issMarker.material = issMarkerMaterial;
   }
 
+  title() {
+    if (!state.engine) return;
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+    state.titleBlock = new GUI.TextBlock();
+    state.titleBlock.color = "white";
+    state.titleBlock.fontSize = 24;
+    state.titleBlock.fontFamily = "monospace";
+    state.titleBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    state.titleBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    state.titleBlock.paddingLeft = "22px";
+    state.titleBlock.paddingTop = "22px";
+    state.titleBlock.text = `ISS TRACKER`;
+    advancedTexture.addControl(state.titleBlock);
+  }
+
   text() {
     if (!state.engine) return;
-    const viewportWidth = state.engine.getRenderWidth();
-    const viewportHeight = state.engine.getRenderHeight();
-    const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
     state.textBlock = new GUI.TextBlock();
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
     state.textBlock.color = "white";
-    state.textBlock.fontSize = 24;
     state.textBlock.fontFamily = "monospace";
     state.textBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    state.textBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
-    state.textBlock.paddingLeft = (viewportWidth * 0.6) + "px";
-    state.textBlock.paddingTop = (viewportHeight * 0.6) + "px";
+    state.textBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+    state.textBlock.paddingLeft = "22px";
     advancedTexture.addControl(state.textBlock);
+  }
+
+  overlay(): GUI.Rectangle {
+    const overlayRect = new GUI.Rectangle();
+    const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+    advancedTexture.addControl(overlayRect);
+    return overlayRect;
   }
 
   updateISSMarker() {
@@ -384,17 +408,29 @@ class Scene {
   }
 
   updateText() {
+    if (!state.engine || !state.textBlock) return;
+    // const viewportWidth = state.engine.getRenderWidth();
+    // const viewportHeight = state.engine.getRenderHeight();
+    // state.textBlock.fontSize = 24;
+    // if (viewportWidth > 1200) {
+    //   state.textBlock.paddingLeft = "20px";
+    //   state.textBlock.paddingTop = (viewportHeight * 0.6) + "px";
+    // }
+    // else {
+    //   state.textBlock.paddingLeft = (viewportWidth * 0.01) + "px";
+    //   state.textBlock.paddingTop = (viewportHeight * 0.2) + "px";
+    // }
+
     state.textBlock.text = `
 ISS|
 LTS| ${Math.floor(state.timeSinceUpdate / 1000)}s
 LAT| ${state.issPos.latitude.toFixed(2)}
 LON| ${state.issPos.longitude.toFixed(2)}
 ALT| ${state.dataRaw ? state.dataRaw.altitude.toFixed(2) + " km" : 'n/a'}
-LOC| ${state.locName.toUpperCase()}
+LOC| ${util.trucString(state.locName.toUpperCase(), 16)}
 DIS| ${state.distance.toFixed(2)} km
 DIR| ${state.direction.toUpperCase()}
 VEL| ${state.dataRaw ? state.dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
-TRK| ${state.isTracking ? "ON" : "OFF"}
 GPL| MATHIEU DOMBROCK
 `;
   }
@@ -446,6 +482,28 @@ GPL| MATHIEU DOMBROCK
     gradientMaterial.setFloat("time", time);
   }
 
+  updateOverlay(overlayRect: GUI.Rectangle) {
+    if (!state.engine) return;
+    const viewportWidth = state.engine.getRenderWidth();
+    const viewportHeight = state.engine.getRenderHeight();
+    // Create the fullscreen GUI texture
+    // Create the rectangle
+    overlayRect.width = (viewportWidth - 20) + "px";
+    overlayRect.height = (viewportHeight - 20) + "px";
+    overlayRect.left = "0px";   // X offset from center
+    overlayRect.top = "0px";    // Y offset from center
+    overlayRect.thickness = 2;    // Outline thickness
+    overlayRect.color = "white";  // Outline color
+    overlayRect.background = "";  // No fill
+  }
+
+  updateCamera(camera: BABYLON.ArcRotateCamera) {
+    // Slowly rotate the camera around the earth if not tracking
+    if (!state.isTracking) {
+      camera.alpha += 0.0001;
+    }
+  }
+
   createScene(): BABYLON.Scene {
     if (!state.engine || !state.canvas) {
       throw new Error("Engine or canvas not initialized");
@@ -461,7 +519,9 @@ GPL| MATHIEU DOMBROCK
     let userMarker = this.userMarker(scene);
     const northPole = this.poles(scene);
     this.issMarker(scene, northPole);
+    this.title();
     this.text();
+    const overlayRect = this.overlay();
 
     // Update loop
     scene.registerBeforeRender(() => {
@@ -472,6 +532,8 @@ GPL| MATHIEU DOMBROCK
       this.updateBgPane(bgPlane, camera);
       // this.updateISSOrbit(scene);
       this.updateShaders(scanline, gradientMaterial);
+      this.updateOverlay(overlayRect);
+      this.updateCamera(camera);
     });
 
     return scene;
