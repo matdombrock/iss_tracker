@@ -12,13 +12,21 @@ let userLatitude = 47.608013; // Example: Seattle
 let userLongitude = -122.335167;
 let issPos = { latitude: 99, longitude: 99 };
 let issPosLast = { latitude: 99, longitude: 99 };
+let locName = "ocean";
 let distance = 0;
 let lastDistance = 0;
 let direction = "???";
 let timeSinceUpdate = 0;
+let isTracking = false;
 let dataRaw: any = null;
 let issMarker: any = null;
 let textBlock: any = null;
+
+const PROD = true;
+if (PROD) {
+  console.log = function() { };
+  console.error = function() { };
+}
 
 
 BABYLON.Effect.ShadersStore["scanlineFragmentShader"] = `
@@ -34,13 +42,32 @@ BABYLON.Effect.ShadersStore["scanlineFragmentShader"] = `
   }
 `;
 
+BABYLON.Effect.ShadersStore["gradientVertexShader"] = `
+  precision highp float;
+  attribute vec3 position;
+  attribute vec2 uv;
+  uniform mat4 worldViewProjection;
+  varying vec2 vUV;
+  void main(void) {
+    gl_Position = worldViewProjection * vec4(position, 1.0);
+    vUV = uv;
+  }
+`;
+
 BABYLON.Effect.ShadersStore["gradientFragmentShader"] = `
   precision highp float;
   varying vec2 vUV;
+  uniform float time;
   void main(void) {
-    // Simple vertical gradient from blue (bottom) to purple (top)
-    vec3 color = mix(vec3(0.1, 0.2, 0.7), vec3(0.5, 0.1, 0.7), vUV.y);
-    gl_FragColor = vec4(color, 1.0);
+    float time2 = time * 0.77;
+    float r = 0.0;
+    float g = vUV.y + sin(time) * cos(time2);
+    float b =  vUV.x + cos(time) * sin(time2);
+    float bright = 0.05;
+    r *= bright;
+    g *= bright;
+    b *= bright;
+    gl_FragColor = vec4(r, g, b, 1.0);
   }
 `;
 
@@ -61,6 +88,20 @@ function cityToLatLong(city: string) {
     })
     .catch(error => console.error("Error fetching city data:", error));
 }
+// https://nominatim.openstreetmap.org/reverse?lat=40.748817&lon=-73.985428&format=json
+function latLongToLocation(latitude: number, longitude: number) {
+  fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
+    .then(response => response.json())
+    .then(data => {
+      if (data && data.address) {
+        console.log(`Location: ${data.display_name}`);
+        locName = data.display_name;
+      } else {
+        console.error("No results found for coordinates:", latitude, longitude);
+      }
+    })
+    .catch(error => console.error("Error fetching location data:", error));
+}
 
 function latLongToCartesian(latitude: number, longitude: number, radius: number = 1) {
   const latRad = latitude * Math.PI / 180;
@@ -80,6 +121,10 @@ function createScene(): BABYLON.Scene {
   const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 6, BABYLON.Vector3.Zero(), scene);
   // Lower the zoom speed
   camera.wheelDeltaPercentage = 0.01;
+  camera.lowerRadiusLimit = 2; // minimum zoom distance
+  camera.upperRadiusLimit = 10; // maximum zoom distance
+  // camera.panningSensibility = 0;
+  camera.panningDistanceLimit = 2;
   camera.attachControl(canvas, true);
   const scanline = new BABYLON.PostProcess(
     "scanline",
@@ -90,12 +135,22 @@ function createScene(): BABYLON.Scene {
     camera
   );
 
-  // Update the time uniform every frame
-  scene.registerBeforeRender(() => {
-    scanline.onApply = (effect) => {
-      effect.setFloat("time", performance.now() * 0.0001);
-    };
-  });
+  const bgPlane = BABYLON.MeshBuilder.CreatePlane("bgPlane", { size: 40 }, scene);
+  bgPlane.position.z = -2;
+  const gradientMaterial = new BABYLON.ShaderMaterial(
+    "gradientMaterial",
+    scene,
+    {
+      vertex: "gradient",
+      fragment: "gradient",
+    },
+    {
+      attributes: ["position", "uv"],
+      uniforms: ["worldViewProjection"],
+    }
+  );
+  gradientMaterial.backFaceCulling = false;
+  bgPlane.material = gradientMaterial;
 
   // Light
   const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
@@ -187,15 +242,31 @@ ISS|
 LTS| ${Math.floor(timeSinceUpdate / 1000)}s
 LAT| ${issPos.latitude.toFixed(2)}
 LON| ${issPos.longitude.toFixed(2)}
+ALT| ${dataRaw ? dataRaw.altitude.toFixed(2) + " km" : 'n/a'}
+LOC| ${locName.toUpperCase()}
 DIS| ${distance.toFixed(2)} km
 DIR| ${direction.toUpperCase()}
 VEL| ${dataRaw ? dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
+TRK| ${isTracking ? "ON" : "OFF"}
+GPL| MATHIEU DOMBROCK
 `;
     light.direction = camera.position.normalize();
     const userPos = latLongToCartesian(userLatitude, userLongitude);
     userMarker.position = new BABYLON.Vector3(userPos.x, userPos.y, userPos.z);
     // Orient the circle to be tangent to the sphere
     userMarker.lookAt(earth.position.subtract(userMarker.position));
+
+    // Ensure the background pane is looking at the camera
+    bgPlane.lookAt(camera.position);
+    bgPlane.position = camera.position.scale(-2);
+
+    // Update shader
+    // Update the time uniform every frame
+    const time = performance.now() * 0.0001;
+    scanline.onApply = (effect) => {
+      effect.setFloat("time", time);
+    };
+    gradientMaterial.setFloat("time", time);
 
     // Draw the ISS orbit
     // const earthRadius = 1; // scale your Earth mesh to radius 1
@@ -241,6 +312,7 @@ function updateISS() {
       }
       lastDistance = distance;
       dataRaw = data;
+      latLongToLocation(latitude, longitude); // Update location name
     })
     .catch(error => console.error("Error fetching ISS data:", error));
 }
@@ -277,9 +349,94 @@ function init(): void {
   engine.runRenderLoop(function() {
     scene.render();
   });
+  // Listen for space key to focus and rotate camera on ISS
+  window.addEventListener("keydown", function(event) {
+    if (event.code === "Space") {
+      const scene = engine.scenes[0];
+      if (scene) {
+        const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
+        if (camera && issPos) {
+          const earthRadius = 1;
+          const issAltitude = dataRaw ? dataRaw.altitude : 0;
+          const issRadius = earthRadius + (issAltitude / 6371);
+          const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
+          const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
 
+          // Calculate spherical coordinates for the ISS position
+          const r = target.length();
+          const theta = Math.acos(target.y / r); // polar angle
+          const phi = Math.atan2(target.z, target.x); // azimuthal angle
+
+          // Set camera angles so ISS is at center
+          camera.alpha = phi;
+          camera.beta = theta;
+          camera.radius = 3; // Or set to a value that frames the ISS well
+
+          camera.setTarget(target);
+        }
+      }
+      event.preventDefault();
+    }
+  });
   window.addEventListener("resize", function() {
     engine.resize();
   });
+
+
+  window.addEventListener("keydown", function(event) {
+    if (event.code === "Space") {
+      isTracking = !isTracking;
+      if (!isTracking) {
+        return;
+      }
+      const scene = engine.scenes[0];
+      if (scene) {
+        const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
+        if (camera && issPos) {
+          const earthRadius = 1;
+          const issAltitude = dataRaw ? dataRaw.altitude : 0;
+          const issRadius = earthRadius + (issAltitude / 6371);
+          const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
+          const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
+
+          // Calculate spherical coordinates for the ISS position
+          const r = target.length();
+          const theta = Math.acos(target.y / r); // polar angle
+          const phi = Math.atan2(target.z, target.x); // azimuthal angle
+
+          // Animate camera angles and target
+          const animFrames = 120;
+          const startAlpha = camera.alpha;
+          const startBeta = camera.beta;
+          const startRadius = camera.radius;
+          const startTarget = camera.target.clone();
+
+          let frame = 0;
+          scene.onBeforeRenderObservable.add(function lerpCamera() {
+            frame++;
+            const t = Math.min(frame / animFrames, 1);
+
+            // Lerp angles (handling wrap-around for alpha)
+            let deltaAlpha = phi - startAlpha;
+            if (deltaAlpha > Math.PI) deltaAlpha -= 2 * Math.PI;
+            if (deltaAlpha < -Math.PI) deltaAlpha += 2 * Math.PI;
+            camera.alpha = startAlpha + deltaAlpha * t;
+            camera.beta = startBeta + (theta - startBeta) * t;
+            camera.radius = startRadius + (3 - startRadius) * t;
+
+            // Lerp target
+            camera.setTarget(BABYLON.Vector3.Lerp(startTarget, target, t));
+
+            if (t >= 1) {
+              scene.onBeforeRenderObservable.removeCallback(lerpCamera);
+            }
+          });
+
+        }
+      }
+      event.preventDefault();
+    }
+  });
+
 }
 init();
