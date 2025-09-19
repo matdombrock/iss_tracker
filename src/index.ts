@@ -32,6 +32,7 @@ interface State {
   direction: string;
   timeSinceUpdate: number;
   isTracking: boolean;
+  mainColor: number[];
   dataRaw: any | null;
   issMarker: any | null;
   textBlock: any | null;
@@ -51,6 +52,7 @@ let state: State = {
   direction: "???",
   timeSinceUpdate: 0,
   isTracking: false,
+  mainColor: [0, 1, 1],
   dataRaw: null,
   issMarker: null,
   textBlock: null,
@@ -91,9 +93,14 @@ BABYLON.Effect.ShadersStore["gradientFragmentShader"] = `
   uniform float time;
   void main(void) {
     float time2 = time * 0.77;
+    float size = 1000.0;
+    float x = sin(vUV.x * size * sin(time/8.0));
+    float y = cos(vUV.y * size * cos(time/8.0));
+    x = (x + 1.0) * 0.5;
+    y = (y + 1.0) * 0.5;
     float r = 0.0;
-    float g = vUV.y + sin(time) * cos(time2);
-    float b =  vUV.x + cos(time) * sin(time2);
+    float g = y + sin(time) * cos(time2);
+    float b =  x + cos(time) * sin(time2);
     float bright = 0.05;
     r *= bright;
     g *= bright;
@@ -229,9 +236,9 @@ class Net {
         // Convert distance to km (1 degree is approximately 111 km)
         state.distance = state.distance * 111;
         if (state.distance < state.lastDistance) {
-          state.direction = "away";
-        } else if (state.distance > state.lastDistance) {
           state.direction = "towards";
+        } else if (state.distance > state.lastDistance) {
+          state.direction = "away";
         } else {
           state.direction = "???";
         }
@@ -247,7 +254,8 @@ const net = new Net();
 class Scene {
   camera(scene: BABYLON.Scene): { camera: BABYLON.ArcRotateCamera, scanline: BABYLON.PostProcess } {
     // Camera
-    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 4, BABYLON.Vector3.Zero(), scene);
+    const initalZoom = 3;
+    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, initalZoom, BABYLON.Vector3.Zero(), scene);
     // Lower the zoom speed
     camera.wheelDeltaPercentage = 0.01;
     camera.lowerRadiusLimit = 2; // minimum zoom distance
@@ -268,7 +276,7 @@ class Scene {
 
   light(scene: BABYLON.Scene): BABYLON.HemisphericLight {
     // Light
-    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
+    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(...state.mainColor), scene);
     light.intensity = 4;
     return light;
   }
@@ -302,29 +310,27 @@ class Scene {
     earthMaterial.bumpTexture = new BABYLON.Texture("img/earthbump1k.jpg", scene, false, false);
     (earthMaterial.bumpTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip
     earthMaterial.bumpTexture.level = 2; // Reduce bump intensity
-    earthMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+    earthMaterial.emissiveColor = new BABYLON.Color3(...state.mainColor);
     earthMaterial.specularTexture = new BABYLON.Texture("img/8k_earth_specular_map.jpg", scene, false, false);
     (earthMaterial.specularTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip if needed
     earthMaterial.specularPower = 4; // Higher value = smaller, sharper highlights
-    earthMaterial.specularColor = new BABYLON.Color3(1, 0, 0); // Red
+    earthMaterial.specularColor = new BABYLON.Color3(...state.mainColor);
     earth.material = earthMaterial;
     return earth;
   }
 
   userMarker(scene: BABYLON.Scene): BABYLON.Mesh {
-    // Draw a red circle on the surface of the earth
     const userMarkerDiameter = 0.05;
     const userMarker = BABYLON.MeshBuilder.CreateDisc("circle", { radius: userMarkerDiameter / 2, tessellation: 64 }, scene);
     const userMarkerMaterial = new BABYLON.StandardMaterial("circleMat", scene);
-    userMarkerMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
-    userMarkerMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+    userMarkerMaterial.diffuseColor = new BABYLON.Color3(...state.mainColor);
+    userMarkerMaterial.emissiveColor = new BABYLON.Color3(...state.mainColor);
     userMarker.material = userMarkerMaterial;
     return userMarker;
   }
 
   poles(scene: BABYLON.Scene): BABYLON.Mesh {
-    // Draw red poles coming out of the earth model
-    const poleHeight = 0.25;
+    const poleHeight = 0.1;
     const poleDiameter = 0.05;
 
     // North Pole
@@ -333,8 +339,8 @@ class Scene {
       diameter: poleDiameter
     }, scene);
     const poleMaterial = new BABYLON.StandardMaterial("poleMat", scene);
-    poleMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
-    poleMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+    poleMaterial.diffuseColor = new BABYLON.Color3(...state.mainColor);
+    poleMaterial.emissiveColor = new BABYLON.Color3(...state.mainColor);
     northPole.material = poleMaterial;
     northPole.position = new BABYLON.Vector3(0, 1 + poleHeight / 2, 0);
 
@@ -353,8 +359,8 @@ class Scene {
     state.issMarker = northPole.clone("otherCircle");
     // Change the color of the issMarker to blue
     const issMarkerMaterial = new BABYLON.StandardMaterial("issCircleMat", scene);
-    issMarkerMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
-    issMarkerMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+    issMarkerMaterial.diffuseColor = new BABYLON.Color3(...state.mainColor);
+    issMarkerMaterial.emissiveColor = new BABYLON.Color3(...state.mainColor);
     state.issMarker.material = issMarkerMaterial;
   }
 
@@ -362,14 +368,13 @@ class Scene {
     if (!state.engine) return;
     const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
     state.titleBlock = new GUI.TextBlock();
-    state.titleBlock.color = "white";
+    state.titleBlock.color = "cyan";
     state.titleBlock.fontSize = 24;
     state.titleBlock.fontFamily = "monospace";
     state.titleBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
     state.titleBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
     state.titleBlock.paddingLeft = "22px";
     state.titleBlock.paddingTop = "22px";
-    state.titleBlock.text = `ISS TRACKER`;
     advancedTexture.addControl(state.titleBlock);
   }
 
@@ -377,7 +382,7 @@ class Scene {
     if (!state.engine) return;
     state.textBlock = new GUI.TextBlock();
     const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-    state.textBlock.color = "white";
+    state.textBlock.color = "cyan";
     state.textBlock.fontFamily = "monospace";
     state.textBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
     state.textBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
@@ -387,6 +392,9 @@ class Scene {
 
   overlay(): GUI.Rectangle {
     const overlayRect = new GUI.Rectangle();
+    overlayRect.thickness = 4;    // Outline thickness
+    overlayRect.color = "cyan";  // Outline color
+    overlayRect.background = "";  // No fill
     const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
     advancedTexture.addControl(overlayRect);
     return overlayRect;
@@ -409,25 +417,21 @@ class Scene {
 
   updateText() {
     if (!state.engine || !state.textBlock) return;
-    // const viewportWidth = state.engine.getRenderWidth();
-    // const viewportHeight = state.engine.getRenderHeight();
-    // state.textBlock.fontSize = 24;
-    // if (viewportWidth > 1200) {
-    //   state.textBlock.paddingLeft = "20px";
-    //   state.textBlock.paddingTop = (viewportHeight * 0.6) + "px";
-    // }
-    // else {
-    //   state.textBlock.paddingLeft = (viewportWidth * 0.01) + "px";
-    //   state.textBlock.paddingTop = (viewportHeight * 0.2) + "px";
-    // }
+
+    state.titleBlock.text = `ISS TRACKER ` + Date.now();
 
     state.textBlock.text = `
 ISS|
+ID#| ${state.dataRaw ? state.dataRaw.id : 'n/a'}
 LTS| ${Math.floor(state.timeSinceUpdate / 1000)}s
 LAT| ${state.issPos.latitude.toFixed(2)}
 LON| ${state.issPos.longitude.toFixed(2)}
 ALT| ${state.dataRaw ? state.dataRaw.altitude.toFixed(2) + " km" : 'n/a'}
-LOC| ${util.trucString(state.locName.toUpperCase(), 16)}
+VIS| ${state.dataRaw ? state.dataRaw.visibility.toUpperCase() : 'n/a'}
+FTP| ${state.dataRaw ? state.dataRaw.footprint.toFixed(2) + " km" : 'n/a'}
+SLT| ${state.dataRaw ? state.dataRaw.solar_lat.toFixed(2) : 'n/a'}
+SLN| ${state.dataRaw ? state.dataRaw.solar_lon.toFixed(2) : 'n/a'}
+OVR| ${util.trucString(state.locName.toUpperCase(), 16)}
 DIS| ${state.distance.toFixed(2)} km
 DIR| ${state.direction.toUpperCase()}
 VEL| ${state.dataRaw ? state.dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
@@ -469,7 +473,7 @@ GPL| MATHIEU DOMBROCK
       points.push(new BABYLON.Vector3(x, y, z));
     }
     const orbitPath = BABYLON.MeshBuilder.CreateLines("issOrbit", { points: points }, scene);
-    orbitPath.color = new BABYLON.Color3(1, 0, 0);
+    orbitPath.color = new BABYLON.Color3(...state.mainColor);
   }
 
   updateShaders(scanline: BABYLON.PostProcess, gradientMaterial: BABYLON.ShaderMaterial) {
@@ -490,17 +494,13 @@ GPL| MATHIEU DOMBROCK
     // Create the rectangle
     overlayRect.width = (viewportWidth - 20) + "px";
     overlayRect.height = (viewportHeight - 20) + "px";
-    overlayRect.left = "0px";   // X offset from center
-    overlayRect.top = "0px";    // Y offset from center
-    overlayRect.thickness = 2;    // Outline thickness
-    overlayRect.color = "white";  // Outline color
-    overlayRect.background = "";  // No fill
   }
 
-  updateCamera(camera: BABYLON.ArcRotateCamera) {
+  updateCamera(camera: BABYLON.ArcRotateCamera, earth: BABYLON.Mesh) {
     // Slowly rotate the camera around the earth if not tracking
     if (!state.isTracking) {
       camera.alpha += 0.0001;
+      // camera.setTarget(earth.position); // Always target the earth
     }
   }
 
@@ -533,7 +533,7 @@ GPL| MATHIEU DOMBROCK
       // this.updateISSOrbit(scene);
       this.updateShaders(scanline, gradientMaterial);
       this.updateOverlay(overlayRect);
-      this.updateCamera(camera);
+      this.updateCamera(camera, earth);
     });
 
     return scene;
