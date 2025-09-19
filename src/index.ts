@@ -2,11 +2,20 @@ import * as BABYLON from "@babylonjs/core";
 import * as GUI from "@babylonjs/gui";
 import "@babylonjs/loaders";
 
-const PROD = false;
-if (PROD) {
+// Check if we have a "dbg" parameter in the URL
+// If so, we are in debug mode and will log to console
+// Otherwise, we are in production mode and will silence console.log and console.error
+// Example: http://localhost:3000/?dbg=1
+const urlParams = new URLSearchParams(window.location.search);
+const dbg = urlParams.get('dbg');
+if (!dbg) {
   console.log = function() { };
   console.error = function() { };
 }
+else {
+  console.log("Debug mode enabled");
+}
+
 //
 // Application state
 //
@@ -165,7 +174,7 @@ const util = new Util();
 //
 // API Wrappers
 //
-class NetClass {
+class Net {
   //  https://nominatim.openstreetmap.org/search?q=Paris&format=json&limit=1
   cityToLatLong(city: string) {
     fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&limit=1`)
@@ -179,6 +188,7 @@ class NetClass {
           state.userLongitude = longitude;
         } else {
           console.error("No results found for city:", city);
+          console.log("We'll call this ocean")
         }
       })
       .catch(error => console.error("Error fetching city data:", error));
@@ -226,9 +236,9 @@ class NetClass {
       .catch(error => console.error("Error fetching ISS data:", error));
   }
 }
-const net = new NetClass();
+const net = new Net();
 
-class SceneClass {
+class Scene {
   camera(scene: BABYLON.Scene): { camera: BABYLON.ArcRotateCamera, scanline: BABYLON.PostProcess } {
     // Camera
     const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 6, BABYLON.Vector3.Zero(), scene);
@@ -281,13 +291,13 @@ class SceneClass {
     // Earth mesh
     const earth = BABYLON.MeshBuilder.CreateSphere("earth", { diameter: 2, segments: 32 }, scene);
     const earthMaterial = new BABYLON.StandardMaterial("earthMaterial", scene);
-    earthMaterial.diffuseTexture = new BABYLON.Texture("public/earth-hi-night-red.jpg", scene, false, false);
+    earthMaterial.diffuseTexture = new BABYLON.Texture("img/earth-hi-night-red.jpg", scene, false, false);
     (earthMaterial.diffuseTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip
-    earthMaterial.bumpTexture = new BABYLON.Texture("public/earthbump1k.jpg", scene, false, false);
+    earthMaterial.bumpTexture = new BABYLON.Texture("img/earthbump1k.jpg", scene, false, false);
     (earthMaterial.bumpTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip
     earthMaterial.bumpTexture.level = 2; // Reduce bump intensity
     earthMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
-    earthMaterial.specularTexture = new BABYLON.Texture("public/8k_earth_specular_map.jpg", scene, false, false);
+    earthMaterial.specularTexture = new BABYLON.Texture("img/8k_earth_specular_map.jpg", scene, false, false);
     (earthMaterial.specularTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip if needed
     earthMaterial.specularPower = 4; // Higher value = smaller, sharper highlights
     earthMaterial.specularColor = new BABYLON.Color3(1, 0, 0); // Red
@@ -436,7 +446,7 @@ GPL| MATHIEU DOMBROCK
     gradientMaterial.setFloat("time", time);
   }
 
-  create(): BABYLON.Scene {
+  createScene(): BABYLON.Scene {
     if (!state.engine || !state.canvas) {
       throw new Error("Engine or canvas not initialized");
     }
@@ -453,6 +463,7 @@ GPL| MATHIEU DOMBROCK
     this.issMarker(scene, northPole);
     this.text();
 
+    // Update loop
     scene.registerBeforeRender(() => {
       this.updateISSMarker();
       this.updateText();
@@ -466,7 +477,7 @@ GPL| MATHIEU DOMBROCK
     return scene;
   }
 
-  start(): void {
+  startScene(): void {
     const el = document.getElementById("renderCanvas");
     if (el instanceof HTMLCanvasElement) {
       state.canvas = el;
@@ -497,11 +508,13 @@ GPL| MATHIEU DOMBROCK
 
     // Start timestamp updates
     setInterval(() => {
-      state.timeSinceUpdate = Date.now() - state.dataRaw.timestamp * 1000;
+      if (state.dataRaw) {
+        state.timeSinceUpdate = Date.now() - state.dataRaw.timestamp * 1000;
+      }
     }, 500);
 
     // Init the Babylon scene and engine
-    const scene = this.create();
+    const scene = this.createScene();
     state.engine.runRenderLoop(function() {
       scene.render();
     });
@@ -521,6 +534,6 @@ GPL| MATHIEU DOMBROCK
     });
   }
 }
-const Scene = new SceneClass();
+const scene = new Scene();
 
-Scene.start();
+scene.startScene();
