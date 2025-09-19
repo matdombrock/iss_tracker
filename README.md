@@ -2,6 +2,8 @@
 
 A 3D visualization of the International Space Station (ISS) in real-time, built with [Babylon.js](https://www.babylonjs.com/). This project displays the ISS's current position, orbit, and other telemetry on a 3D globe, with user location support and dynamic UI overlays.
 
+![screenshot](doc/screenshot.png)
+
 ## Features
 
 - Real-time ISS position and telemetry (location, altitude, velocity, etc.)
@@ -13,6 +15,10 @@ A 3D visualization of the International Space Station (ISS) in real-time, built 
 - Camera controls and smooth focus on ISS
 - Custom shaders for visual effects
 - Debug mode for verbose logging
+
+## Tech Stack
+- TypeScript
+- BabylonJS
 
 ## Getting Started
 
