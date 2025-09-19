@@ -313,7 +313,7 @@ class Scene {
     earthMaterial.emissiveColor = new BABYLON.Color3(...state.mainColor);
     earthMaterial.specularTexture = new BABYLON.Texture("img/8k_earth_specular_map.jpg", scene, false, false);
     (earthMaterial.specularTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip if needed
-    earthMaterial.specularPower = 4; // Higher value = smaller, sharper highlights
+    earthMaterial.specularPower = 2; // Higher value = smaller, sharper highlights
     earthMaterial.specularColor = new BABYLON.Color3(...state.mainColor);
     earth.material = earthMaterial;
     return earth;
