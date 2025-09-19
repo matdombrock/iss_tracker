@@ -1,6 +1,6 @@
 # ISS Tracker
 
-A 3D visualization of the International Space Station (ISS) in real-time, built with [Babylon.js](https://www.babylonjs.com/). This project displays the ISS's current position, orbit, and other telemetry on a 3D globe, with user location support and dynamic UI overlays.
+A 3D real-time visualization of the International Space Station (ISS) location, built with [Babylon.js](https://www.babylonjs.com/). This project displays the ISS's current position and other telemetry on a interactive 3D globe. It can be used to determine when the ISS will pass over your real world location.
 
 ![screenshot](doc/screenshot.png)
 
