@@ -4,6 +4,8 @@ A 3D real-time visualization of the International Space Station (ISS) location, 
 
 ![screenshot](doc/screenshot.png)
 
+## [CHECK IT OUT ON ITCH](https://replicat.itch.io/iss-tracker)
+
 ## Features
 
 - Real-time ISS position and telemetry (location, altitude, velocity, etc.)
