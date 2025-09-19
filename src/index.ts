@@ -374,7 +374,7 @@ class Scene {
     state.titleBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
     state.titleBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
     state.titleBlock.paddingLeft = "22px";
-    state.titleBlock.paddingTop = "22px";
+    state.titleBlock.paddingTop = "30px";
     advancedTexture.addControl(state.titleBlock);
   }
 
