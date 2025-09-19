@@ -4,11 +4,18 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
-    "babylonjs": "^8.28.0",
-    "babylonjs-gltf2interface": "^8.28.0",
-    "typescript": "^5.9.2"
+    "@babylonjs/core": "^8.28.1",
+    "@babylonjs/gui": "^8.28.1",
+    "@babylonjs/loaders": "^8.28.1",
+    "babylonjs-gltf2interface": "^8.28.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@types/babylonjs": "^2.3.31",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.2",
+    "webpack": "^5.101.3",
+    "webpack-cli": "^6.0.1"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
