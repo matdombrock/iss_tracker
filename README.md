@@ -4,8 +4,7 @@ A 3D real-time visualization of the International Space Station (ISS) location, 
 
 ![screenshot](doc/screenshot.png)
 
-## >>> [CHECK IT OUT ON ITCH](https://replicat.itch.io/iss-tracker)
-![itchlogo](https://static.itch.io/images/badge-color.svg)
+## >>> [CHECK IT OUT ON ITCH.IO](https://replicat.itch.io/iss-tracker)
 
 ## Features
 
