@@ -22,7 +22,7 @@ let dataRaw: any = null;
 let issMarker: any = null;
 let textBlock: any = null;
 
-const PROD = true;
+const PROD = false;
 if (PROD) {
   console.log = function() { };
   console.error = function() { };
@@ -385,10 +385,11 @@ function init(): void {
 
   window.addEventListener("keydown", function(event) {
     if (event.code === "Space") {
-      isTracking = !isTracking;
-      if (!isTracking) {
-        return;
-      }
+      // isTracking = !isTracking;
+      // if (!isTracking) {
+      //   console.log("Tracking OFF");
+      //   return;
+      // }
       const scene = engine.scenes[0];
       if (scene) {
         const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
