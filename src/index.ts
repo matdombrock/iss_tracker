@@ -2,13 +2,17 @@ import * as BABYLON from "@babylonjs/core";
 import * as GUI from "@babylonjs/gui";
 import "@babylonjs/loaders";
 
-const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement | null;
-if (!canvas) {
-  throw new Error('Canvas element not found');
+const PROD = false;
+if (PROD) {
+  console.log = function() { };
+  console.error = function() { };
 }
-const engine = new BABYLON.Engine(canvas, true);
-
+//
+// Application state
+//
 interface State {
+  engine: BABYLON.Engine | null;
+  canvas: HTMLCanvasElement | null;
   userLatitude: number;
   userLongitude: number;
   issPos: { latitude: number; longitude: number };
@@ -25,6 +29,8 @@ interface State {
 }
 
 let state: State = {
+  canvas: null,
+  engine: null,
   userLatitude: 47.608013, // Default: Seattle
   userLongitude: -122.335167,
   issPos: { latitude: 99, longitude: 99 },
@@ -40,13 +46,9 @@ let state: State = {
   textBlock: null,
 };
 
-const PROD = false;
-if (PROD) {
-  console.log = function() { };
-  console.error = function() { };
-}
-
-
+//
+// Shaders
+//
 BABYLON.Effect.ShadersStore["scanlineFragmentShader"] = `
   precision highp float;
   varying vec2 vUV;
@@ -89,8 +91,28 @@ BABYLON.Effect.ShadersStore["gradientFragmentShader"] = `
   }
 `;
 
-//   https://nominatim.openstreetmap.org/search?q=Paris&format=json&limit=1
-function cityToLatLong(city: string) {
+//
+// Utility functions
+//
+class Util {
+  // Convert latitude and longitude to Cartesian coordinates on a sphere
+  latLongToCartesian = function(latitude: number, longitude: number, radius: number = 1) {
+    const latRad = latitude * Math.PI / 180;
+    const lonRad = (longitude + 180) * Math.PI / 180;
+    const x = radius * Math.cos(latRad) * Math.cos(lonRad);
+    const y = radius * Math.sin(latRad);
+    const z = radius * Math.cos(latRad) * Math.sin(lonRad);
+    return { x, y, z };
+  }
+};
+const util = new Util();
+
+//
+// API Wrappers
+//
+const Net: any = {};
+//  https://nominatim.openstreetmap.org/search?q=Paris&format=json&limit=1
+Net.cityToLatLong = function(city: string) {
   fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&limit=1`)
     .then(response => response.json())
     .then(data => {
@@ -107,7 +129,7 @@ function cityToLatLong(city: string) {
     .catch(error => console.error("Error fetching city data:", error));
 }
 // https://nominatim.openstreetmap.org/reverse?lat=40.748817&lon=-73.985428&format=json
-function latLongToLocation(latitude: number, longitude: number) {
+Net.latLongToLocation = function(latitude: number, longitude: number) {
   fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
     .then(response => response.json())
     .then(data => {
@@ -121,20 +143,36 @@ function latLongToLocation(latitude: number, longitude: number) {
     .catch(error => console.error("Error fetching location data:", error));
 }
 
-function latLongToCartesian(latitude: number, longitude: number, radius: number = 1) {
-  const latRad = latitude * Math.PI / 180;
-  const lonRad = (longitude + 180) * Math.PI / 180;
-  const x = radius * Math.cos(latRad) * Math.cos(lonRad);
-  const y = radius * Math.sin(latRad);
-  const z = radius * Math.cos(latRad) * Math.sin(lonRad);
-  return { x, y, z };
+Net.updateISS = function() {
+  // Make a request to https://api.wheretheiss.at/v1/satellites/25544
+  fetch("https://api.wheretheiss.at/v1/satellites/25544")
+    .then(response => response.json())
+    .then(data => {
+      const latitude = data.latitude;
+      const longitude = data.longitude;
+      console.log(`ISS Position - Latitude: ${latitude}, Longitude: ${longitude}`);
+      state.issPosLast = state.issPos;
+      state.issPos = { latitude, longitude };
+      state.distance = Math.sqrt(Math.pow(latitude - state.userLatitude, 2) + Math.pow(longitude + state.userLongitude, 2));
+      // Convert distance to km (1 degree is approximately 111 km)
+      state.distance = state.distance * 111;
+      if (state.distance < state.lastDistance) {
+        state.direction = "away";
+      } else if (state.distance > state.lastDistance) {
+        state.direction = "towards";
+      } else {
+        state.direction = "???";
+      }
+      state.lastDistance = state.distance;
+      state.dataRaw = data;
+      Net.latLongToLocation(latitude, longitude); // Update location name
+    })
+    .catch(error => console.error("Error fetching ISS data:", error));
 }
 
-function createScene(): BABYLON.Scene {
-  const scene = new BABYLON.Scene(engine);
-  // Set the clear color to black
-  scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+const Scene: any = {};
 
+Scene.camera = function(scene: BABYLON.Scene): { camera: BABYLON.ArcRotateCamera, scanline: BABYLON.PostProcess } {
   // Camera
   const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 6, BABYLON.Vector3.Zero(), scene);
   // Lower the zoom speed
@@ -143,7 +181,7 @@ function createScene(): BABYLON.Scene {
   camera.upperRadiusLimit = 10; // maximum zoom distance
   // camera.panningSensibility = 0;
   camera.panningDistanceLimit = 2;
-  camera.attachControl(canvas, true);
+  camera.attachControl(state.canvas, true);
   const scanline = new BABYLON.PostProcess(
     "scanline",
     "scanline",
@@ -152,7 +190,17 @@ function createScene(): BABYLON.Scene {
     1.0,
     camera
   );
+  return { camera, scanline };
+}
 
+Scene.light = function(scene: BABYLON.Scene): BABYLON.HemisphericLight {
+  // Light
+  const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
+  light.intensity = 4;
+  return light;
+}
+
+Scene.bgPlane = function(scene: BABYLON.Scene): { bgPlane: BABYLON.Mesh, gradientMaterial: BABYLON.ShaderMaterial } {
   const bgPlane = BABYLON.MeshBuilder.CreatePlane("bgPlane", { size: 40 }, scene);
   bgPlane.position.z = -2;
   const gradientMaterial = new BABYLON.ShaderMaterial(
@@ -169,11 +217,10 @@ function createScene(): BABYLON.Scene {
   );
   gradientMaterial.backFaceCulling = false;
   bgPlane.material = gradientMaterial;
+  return { bgPlane, gradientMaterial };
+}
 
-  // Light
-  const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
-  light.intensity = 4;
-
+Scene.earth = function(scene: BABYLON.Scene): BABYLON.Mesh {
   // Earth mesh
   const earth = BABYLON.MeshBuilder.CreateSphere("earth", { diameter: 2, segments: 32 }, scene);
   const earthMaterial = new BABYLON.StandardMaterial("earthMaterial", scene);
@@ -188,7 +235,10 @@ function createScene(): BABYLON.Scene {
   earthMaterial.specularPower = 4; // Higher value = smaller, sharper highlights
   earthMaterial.specularColor = new BABYLON.Color3(1, 0, 0); // Red
   earth.material = earthMaterial;
+  return earth;
+}
 
+Scene.userMarker = function(scene: BABYLON.Scene): BABYLON.Mesh {
   // Draw a red circle on the surface of the earth
   const userMarkerDiameter = 0.05;
   const userMarker = BABYLON.MeshBuilder.CreateDisc("circle", { radius: userMarkerDiameter / 2, tessellation: 64 }, scene);
@@ -196,7 +246,10 @@ function createScene(): BABYLON.Scene {
   userMarkerMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
   userMarkerMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
   userMarker.material = userMarkerMaterial;
+  return userMarker;
+}
 
+Scene.poles = function(scene: BABYLON.Scene): BABYLON.Mesh {
   // Draw red poles coming out of the earth model
   const poleHeight = 0.25;
   const poleDiameter = 0.05;
@@ -219,7 +272,10 @@ function createScene(): BABYLON.Scene {
   }, scene);
   southPole.material = poleMaterial;
   southPole.position = new BABYLON.Vector3(0, -1 - poleHeight / 2, 0);
+  return northPole;
+}
 
+Scene.issMarker = function(scene: BABYLON.Scene, northPole: BABYLON.Mesh) {
   // Draw ISS marker
   state.issMarker = northPole.clone("otherCircle");
   // Change the color of the issMarker to blue
@@ -227,10 +283,12 @@ function createScene(): BABYLON.Scene {
   issMarkerMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
   issMarkerMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
   state.issMarker.material = issMarkerMaterial;
+}
 
-  const viewportWidth = engine.getRenderWidth();
-  const viewportHeight = engine.getRenderHeight();
-  // Draw the ISS position to the screen as text
+Scene.text = function() {
+  if (!state.engine) return;
+  const viewportWidth = state.engine.getRenderWidth();
+  const viewportHeight = state.engine.getRenderHeight();
   const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
   state.textBlock = new GUI.TextBlock();
   state.textBlock.color = "white";
@@ -241,21 +299,25 @@ function createScene(): BABYLON.Scene {
   state.textBlock.paddingLeft = (viewportWidth * 0.6) + "px";
   state.textBlock.paddingTop = (viewportHeight * 0.6) + "px";
   advancedTexture.addControl(state.textBlock);
+}
 
-  scene.registerBeforeRender(() => {
-    if (state.issMarker) {
-      const earthRadius = 1;
-      const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0; // in km
-      const issRadius = earthRadius + (issAltitude / 6371);
-      const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
-      state.issMarker.position.set(pos.x, pos.y, pos.z);
-      state.issMarker.position.set(pos.x, pos.y, pos.z);
-      // Rotate the marker so that it faces the 0,0,0 point with a 90 degree local rotation on the X axis
-      state.issMarker.lookAt(BABYLON.Vector3.Zero(), 0, Math.PI / 2);
-      // Move the marker out a bit so it doesn't clip into the earth
-      state.issMarker.position = state.issMarker.position.normalize().scale(1.2);
-    }
-    state.textBlock.text = `
+Scene.updateISSMarker = function() {
+  if (state.issMarker) {
+    const earthRadius = 1;
+    const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0; // in km
+    const issRadius = earthRadius + (issAltitude / 6371);
+    const pos = util.latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
+    state.issMarker.position.set(pos.x, pos.y, pos.z);
+    state.issMarker.position.set(pos.x, pos.y, pos.z);
+    // Rotate the marker so that it faces the 0,0,0 point with a 90 degree local rotation on the X axis
+    state.issMarker.lookAt(BABYLON.Vector3.Zero(), 0, Math.PI / 2);
+    // Move the marker out a bit so it doesn't clip into the earth
+    state.issMarker.position = state.issMarker.position.normalize().scale(1.2);
+  }
+}
+
+Scene.updateText = function() {
+  state.textBlock.text = `
 ISS|
 LTS| ${Math.floor(state.timeSinceUpdate / 1000)}s
 LAT| ${state.issPos.latitude.toFixed(2)}
@@ -268,76 +330,100 @@ VEL| ${state.dataRaw ? state.dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
 TRK| ${state.isTracking ? "ON" : "OFF"}
 GPL| MATHIEU DOMBROCK
 `;
-    light.direction = camera.position.normalize();
-    const userPos = latLongToCartesian(state.userLatitude, state.userLongitude);
-    userMarker.position = new BABYLON.Vector3(userPos.x, userPos.y, userPos.z);
-    // Orient the circle to be tangent to the sphere
-    userMarker.lookAt(earth.position.subtract(userMarker.position));
+}
 
-    // Ensure the background pane is looking at the camera
-    bgPlane.lookAt(camera.position);
-    bgPlane.position = camera.position.scale(-2);
+Scene.updateLight = function(light: BABYLON.HemisphericLight, camera: BABYLON.ArcRotateCamera) {
+  light.direction = camera.position.normalize();
+}
 
-    // Update shader
-    // Update the time uniform every frame
-    const time = performance.now() * 0.0001;
-    scanline.onApply = (effect) => {
-      effect.setFloat("time", time);
-    };
-    gradientMaterial.setFloat("time", time);
+Scene.updateUserMarker = function(userMarker: BABYLON.Mesh, earth: BABYLON.Mesh) {
+  const userPos = util.latLongToCartesian(state.userLatitude, state.userLongitude);
+  userMarker.position = new BABYLON.Vector3(userPos.x, userPos.y, userPos.z);
+  // Orient the circle to be tangent to the sphere
+  userMarker.lookAt(earth.position.subtract(userMarker.position));
+}
 
-    // Draw the ISS orbit
-    // const earthRadius = 1; // scale your Earth mesh to radius 1
-    // const issAltitude = 420 / 6371; // scale altitude to mesh units
-    // const orbitRadius = earthRadius + issAltitude;
-    // const inclination = 51.6 * Math.PI / 180; // radians
-    // const points = [];
-    // const segments = 128;
-    // for (let i = 0; i <= segments; i++) {
-    //   const theta = (i / segments) * 2 * Math.PI;
-    //   // Circle in XZ plane, then rotate for inclination
-    //   let x = orbitRadius * Math.cos(theta);
-    //   let y = orbitRadius * Math.sin(theta) * Math.sin(inclination);
-    //   let z = orbitRadius * Math.sin(theta) * Math.cos(inclination);
-    //   points.push(new BABYLON.Vector3(x, y, z));
-    // }
-    // const orbitPath = BABYLON.MeshBuilder.CreateLines("issOrbit", { points: points }, scene);
-    // orbitPath.color = new BABYLON.Color3(1, 0, 0);
+Scene.updateBgPane = function(bgPlane: BABYLON.Mesh, camera: BABYLON.ArcRotateCamera) {
+  // Ensure the background pane is looking at the camera
+  bgPlane.lookAt(camera.position);
+  bgPlane.position = camera.position.scale(-2);
+}
+
+Scene.updateISSOrbit = function(scene: BABYLON.Scene) {
+  // Draw the ISS orbit
+  const earthRadius = 1; // scale your Earth mesh to radius 1
+  const issAltitude = 420 / 6371; // scale altitude to mesh units
+  const orbitRadius = earthRadius + issAltitude;
+  const inclination = 51.6 * Math.PI / 180; // radians
+  const points = [];
+  const segments = 128;
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * 2 * Math.PI;
+    // Circle in XZ plane, then rotate for inclination
+    let x = orbitRadius * Math.cos(theta);
+    let y = orbitRadius * Math.sin(theta) * Math.sin(inclination);
+    let z = orbitRadius * Math.sin(theta) * Math.cos(inclination);
+    points.push(new BABYLON.Vector3(x, y, z));
+  }
+  const orbitPath = BABYLON.MeshBuilder.CreateLines("issOrbit", { points: points }, scene);
+  orbitPath.color = new BABYLON.Color3(1, 0, 0);
+}
+
+Scene.updateShaders = function(scanline: BABYLON.PostProcess, gradientMaterial: BABYLON.ShaderMaterial) {
+  // Update shader
+  // Update the time uniform every frame
+  const time = performance.now() * 0.0001;
+  scanline.onApply = (effect: BABYLON.Effect) => {
+    effect.setFloat("time", time);
+  };
+  gradientMaterial.setFloat("time", time);
+}
+
+Scene.create = function(): BABYLON.Scene {
+  if (!state.engine || !state.canvas) {
+    throw new Error("Engine or canvas not initialized");
+  }
+  const scene = new BABYLON.Scene(state.engine);
+  // Set the clear color to black
+  scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+
+  let { camera, scanline } = Scene.camera(scene);
+  let { bgPlane, gradientMaterial } = Scene.bgPlane(scene);
+  let light = Scene.light(scene);
+  let earth = Scene.earth(scene);
+  let userMarker = Scene.userMarker(scene);
+  const northPole = Scene.poles(scene);
+  Scene.issMarker(scene, northPole);
+  Scene.text();
+
+  scene.registerBeforeRender(() => {
+    Scene.updateISSMarker();
+    Scene.updateText();
+    Scene.updateLight(light, camera);
+    Scene.updateUserMarker(userMarker, earth);
+    Scene.updateBgPane(bgPlane, camera);
+    // Scene.updateISSOrbit(scene);
+    Scene.updateShaders(scanline, gradientMaterial);
   });
 
   return scene;
 };
 
-function updateISS() {
-  // Make a request to https://api.wheretheiss.at/v1/satellites/25544
-  fetch("https://api.wheretheiss.at/v1/satellites/25544")
-    .then(response => response.json())
-    .then(data => {
-      const latitude = data.latitude;
-      const longitude = data.longitude;
-      console.log(`ISS Position - Latitude: ${latitude}, Longitude: ${longitude}`);
-      state.issPosLast = state.issPos;
-      state.issPos = { latitude, longitude };
-      state.distance = Math.sqrt(Math.pow(latitude - state.userLatitude, 2) + Math.pow(longitude + state.userLongitude, 2));
-      // Convert distance to km (1 degree is approximately 111 km)
-      state.distance = state.distance * 111;
-      if (state.distance < state.lastDistance) {
-        state.direction = "away";
-      } else if (state.distance > state.lastDistance) {
-        state.direction = "towards";
-      } else {
-        state.direction = "???";
-      }
-      state.lastDistance = state.distance;
-      state.dataRaw = data;
-      latLongToLocation(latitude, longitude); // Update location name
-    })
-    .catch(error => console.error("Error fetching ISS data:", error));
-}
+Scene.start = function(): void {
+  const el = document.getElementById("renderCanvas");
+  if (el instanceof HTMLCanvasElement) {
+    state.canvas = el;
+  } else {
+    throw new Error('"renderCanvas" is not a canvas element');
+  }
+  state.engine = new BABYLON.Engine(state.canvas, true, { preserveDrawingBuffer: true, stencil: true });
 
-function init(): void {
-  updateISS();
-  setInterval(updateISS, 5000);
+  if (!state.engine) {
+    console.error("Babylon engine creation failed");
+    return;
+  }
+  Net.updateISS();
+  setInterval(Net.updateISS, 5000);
 
   setInterval(() => {
     state.timeSinceUpdate = Date.now() - state.dataRaw.timestamp * 1000;
@@ -347,7 +433,7 @@ function init(): void {
   const urlParams = new URLSearchParams(window.location.search);
   const city = urlParams.get('city');
   if (city) {
-    cityToLatLong(city);
+    Net.cityToLatLong(city);
   }
 
   navigator.geolocation.getCurrentPosition(
@@ -362,22 +448,23 @@ function init(): void {
     }
   )
 
-  const scene = createScene();
+  const scene = Scene.create();
 
-  engine.runRenderLoop(function() {
+  state.engine.runRenderLoop(function() {
     scene.render();
   });
   // Listen for space key to focus and rotate camera on ISS
   window.addEventListener("keydown", function(event) {
+    if (state.engine === null) return;
     if (event.code === "Space") {
-      const scene = engine.scenes[0];
+      const scene = state.engine.scenes[0];
       if (scene) {
         const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
         if (camera && state.issPos) {
           const earthRadius = 1;
           const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0;
           const issRadius = earthRadius + (issAltitude / 6371);
-          const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
+          const pos = util.latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
           const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
 
           // Calculate spherical coordinates for the ISS position
@@ -397,7 +484,8 @@ function init(): void {
     }
   });
   window.addEventListener("resize", function() {
-    engine.resize();
+    if (state.engine === null) return;
+    state.engine.resize();
   });
 
 
@@ -408,14 +496,15 @@ function init(): void {
       //   console.log("Tracking OFF");
       //   return;
       // }
-      const scene = engine.scenes[0];
+      if (state.engine === null) return;
+      const scene = state.engine.scenes[0];
       if (scene) {
         const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
         if (camera && state.issPos) {
           const earthRadius = 1;
           const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0;
           const issRadius = earthRadius + (issAltitude / 6371);
-          const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
+          const pos = util.latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
           const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
 
           // Calculate spherical coordinates for the ISS position
@@ -458,4 +547,4 @@ function init(): void {
   });
 
 }
-init();
+Scene.start();
