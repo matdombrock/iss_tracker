@@ -20,6 +20,30 @@ let dataRaw: any = null;
 let issMarker: any = null;
 let textBlock: any = null;
 
+
+BABYLON.Effect.ShadersStore["scanlineFragmentShader"] = `
+  precision highp float;
+  varying vec2 vUV;
+  uniform sampler2D textureSampler;
+  uniform float time;
+  void main(void) {
+    vec4 color = texture2D(textureSampler, vUV);
+    float scanline = sin((vUV.y + time * 0.2) * 800.0) * 0.08;
+    color.rgb -= scanline;
+    gl_FragColor = color;
+  }
+`;
+
+BABYLON.Effect.ShadersStore["gradientFragmentShader"] = `
+  precision highp float;
+  varying vec2 vUV;
+  void main(void) {
+    // Simple vertical gradient from blue (bottom) to purple (top)
+    vec3 color = mix(vec3(0.1, 0.2, 0.7), vec3(0.5, 0.1, 0.7), vUV.y);
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
 //   https://nominatim.openstreetmap.org/search?q=Paris&format=json&limit=1
 function cityToLatLong(city: string) {
   fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&limit=1`)
@@ -38,13 +62,12 @@ function cityToLatLong(city: string) {
     .catch(error => console.error("Error fetching city data:", error));
 }
 
-function latLongToCartesian(latitude: number, longitude: number) {
-  const r = 1; // earth radius
+function latLongToCartesian(latitude: number, longitude: number, radius: number = 1) {
   const latRad = latitude * Math.PI / 180;
   const lonRad = (longitude + 180) * Math.PI / 180;
-  const x = r * Math.cos(latRad) * Math.cos(lonRad);
-  const y = r * Math.sin(latRad);
-  const z = r * Math.cos(latRad) * Math.sin(lonRad);
+  const x = radius * Math.cos(latRad) * Math.cos(lonRad);
+  const y = radius * Math.sin(latRad);
+  const z = radius * Math.cos(latRad) * Math.sin(lonRad);
   return { x, y, z };
 }
 
@@ -58,6 +81,21 @@ function createScene(): BABYLON.Scene {
   // Lower the zoom speed
   camera.wheelDeltaPercentage = 0.01;
   camera.attachControl(canvas, true);
+  const scanline = new BABYLON.PostProcess(
+    "scanline",
+    "scanline",
+    ["time"], // uniforms
+    null,
+    1.0,
+    camera
+  );
+
+  // Update the time uniform every frame
+  scene.registerBeforeRender(() => {
+    scanline.onApply = (effect) => {
+      effect.setFloat("time", performance.now() * 0.0001);
+    };
+  });
 
   // Light
   const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
@@ -66,12 +104,16 @@ function createScene(): BABYLON.Scene {
   // Earth mesh
   const earth = BABYLON.MeshBuilder.CreateSphere("earth", { diameter: 2, segments: 32 }, scene);
   const earthMaterial = new BABYLON.StandardMaterial("earthMaterial", scene);
-  earthMaterial.diffuseTexture = new BABYLON.Texture("public/earth-bw.jpg", scene, false, false);
+  earthMaterial.diffuseTexture = new BABYLON.Texture("public/earth-hi-night-red.jpg", scene, false, false);
   (earthMaterial.diffuseTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip
   earthMaterial.bumpTexture = new BABYLON.Texture("public/earthbump1k.jpg", scene, false, false);
   (earthMaterial.bumpTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip
   earthMaterial.bumpTexture.level = 2; // Reduce bump intensity
   earthMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+  earthMaterial.specularTexture = new BABYLON.Texture("public/8k_earth_specular_map.jpg", scene, false, false);
+  (earthMaterial.specularTexture as BABYLON.Texture).uScale = -1; // Fix horizontal flip if needed
+  earthMaterial.specularPower = 4; // Higher value = smaller, sharper highlights
+  earthMaterial.specularColor = new BABYLON.Color3(1, 0, 0); // Red
   earth.material = earthMaterial;
 
   // Draw a red circle on the surface of the earth
@@ -129,7 +171,11 @@ function createScene(): BABYLON.Scene {
 
   scene.registerBeforeRender(() => {
     if (issMarker) {
-      const pos = latLongToCartesian(issPos.latitude, issPos.longitude);
+      const earthRadius = 1;
+      const issAltitude = dataRaw ? dataRaw.altitude : 0; // in km
+      const issRadius = earthRadius + (issAltitude / 6371);
+      const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
+      issMarker.position.set(pos.x, pos.y, pos.z);
       issMarker.position.set(pos.x, pos.y, pos.z);
       // Rotate the marker so that it faces the 0,0,0 point with a 90 degree local rotation on the X axis
       issMarker.lookAt(BABYLON.Vector3.Zero(), 0, Math.PI / 2);
@@ -152,22 +198,22 @@ VEL| ${dataRaw ? dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
     userMarker.lookAt(earth.position.subtract(userMarker.position));
 
     // Draw the ISS orbit
-    const earthRadius = 1; // scale your Earth mesh to radius 1
-    const issAltitude = 420 / 6371; // scale altitude to mesh units
-    const orbitRadius = earthRadius + issAltitude;
-    const inclination = 51.6 * Math.PI / 180; // radians
-    const points = [];
-    const segments = 128;
-    for (let i = 0; i <= segments; i++) {
-      const theta = (i / segments) * 2 * Math.PI;
-      // Circle in XZ plane, then rotate for inclination
-      let x = orbitRadius * Math.cos(theta);
-      let y = orbitRadius * Math.sin(theta) * Math.sin(inclination);
-      let z = orbitRadius * Math.sin(theta) * Math.cos(inclination);
-      points.push(new BABYLON.Vector3(x, y, z));
-    }
-    const orbitPath = BABYLON.MeshBuilder.CreateLines("issOrbit", { points: points }, scene);
-    orbitPath.color = new BABYLON.Color3(1, 0, 0);
+    // const earthRadius = 1; // scale your Earth mesh to radius 1
+    // const issAltitude = 420 / 6371; // scale altitude to mesh units
+    // const orbitRadius = earthRadius + issAltitude;
+    // const inclination = 51.6 * Math.PI / 180; // radians
+    // const points = [];
+    // const segments = 128;
+    // for (let i = 0; i <= segments; i++) {
+    //   const theta = (i / segments) * 2 * Math.PI;
+    //   // Circle in XZ plane, then rotate for inclination
+    //   let x = orbitRadius * Math.cos(theta);
+    //   let y = orbitRadius * Math.sin(theta) * Math.sin(inclination);
+    //   let z = orbitRadius * Math.sin(theta) * Math.cos(inclination);
+    //   points.push(new BABYLON.Vector3(x, y, z));
+    // }
+    // const orbitPath = BABYLON.MeshBuilder.CreateLines("issOrbit", { points: points }, scene);
+    // orbitPath.color = new BABYLON.Color3(1, 0, 0);
   });
 
   return scene;
