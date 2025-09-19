@@ -8,19 +8,37 @@ if (!canvas) {
 }
 const engine = new BABYLON.Engine(canvas, true);
 
-let userLatitude = 47.608013; // Example: Seattle
-let userLongitude = -122.335167;
-let issPos = { latitude: 99, longitude: 99 };
-let issPosLast = { latitude: 99, longitude: 99 };
-let locName = "ocean";
-let distance = 0;
-let lastDistance = 0;
-let direction = "???";
-let timeSinceUpdate = 0;
-let isTracking = false;
-let dataRaw: any = null;
-let issMarker: any = null;
-let textBlock: any = null;
+interface State {
+  userLatitude: number;
+  userLongitude: number;
+  issPos: { latitude: number; longitude: number };
+  issPosLast: { latitude: number; longitude: number };
+  locName: string;
+  distance: number;
+  lastDistance: number;
+  direction: string;
+  timeSinceUpdate: number;
+  isTracking: boolean;
+  dataRaw: any | null;
+  issMarker: any | null;
+  textBlock: any | null;
+}
+
+let state: State = {
+  userLatitude: 47.608013, // Default: Seattle
+  userLongitude: -122.335167,
+  issPos: { latitude: 99, longitude: 99 },
+  issPosLast: { latitude: 99, longitude: 99 },
+  locName: "ocean",
+  distance: 0,
+  lastDistance: 0,
+  direction: "???",
+  timeSinceUpdate: 0,
+  isTracking: false,
+  dataRaw: null,
+  issMarker: null,
+  textBlock: null,
+};
 
 const PROD = false;
 if (PROD) {
@@ -80,8 +98,8 @@ function cityToLatLong(city: string) {
         const latitude = parseFloat(data[0].lat);
         const longitude = parseFloat(data[0].lon);
         console.log(`City ${city} Position - Latitude: ${latitude}, Longitude: ${longitude}`);
-        userLatitude = latitude;
-        userLongitude = longitude;
+        state.userLatitude = latitude;
+        state.userLongitude = longitude;
       } else {
         console.error("No results found for city:", city);
       }
@@ -95,7 +113,7 @@ function latLongToLocation(latitude: number, longitude: number) {
     .then(data => {
       if (data && data.address) {
         console.log(`Location: ${data.display_name}`);
-        locName = data.display_name;
+        state.locName = data.display_name;
       } else {
         console.error("No results found for coordinates:", latitude, longitude);
       }
@@ -203,55 +221,55 @@ function createScene(): BABYLON.Scene {
   southPole.position = new BABYLON.Vector3(0, -1 - poleHeight / 2, 0);
 
   // Draw ISS marker
-  issMarker = northPole.clone("otherCircle");
+  state.issMarker = northPole.clone("otherCircle");
   // Change the color of the issMarker to blue
   const issMarkerMaterial = new BABYLON.StandardMaterial("issCircleMat", scene);
   issMarkerMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
   issMarkerMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
-  issMarker.material = issMarkerMaterial;
+  state.issMarker.material = issMarkerMaterial;
 
   const viewportWidth = engine.getRenderWidth();
   const viewportHeight = engine.getRenderHeight();
   // Draw the ISS position to the screen as text
   const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-  textBlock = new GUI.TextBlock();
-  textBlock.color = "white";
-  textBlock.fontSize = 24;
-  textBlock.fontFamily = "monospace";
-  textBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-  textBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
-  textBlock.paddingLeft = (viewportWidth * 0.6) + "px";
-  textBlock.paddingTop = (viewportHeight * 0.6) + "px";
-  advancedTexture.addControl(textBlock);
+  state.textBlock = new GUI.TextBlock();
+  state.textBlock.color = "white";
+  state.textBlock.fontSize = 24;
+  state.textBlock.fontFamily = "monospace";
+  state.textBlock.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+  state.textBlock.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
+  state.textBlock.paddingLeft = (viewportWidth * 0.6) + "px";
+  state.textBlock.paddingTop = (viewportHeight * 0.6) + "px";
+  advancedTexture.addControl(state.textBlock);
 
   scene.registerBeforeRender(() => {
-    if (issMarker) {
+    if (state.issMarker) {
       const earthRadius = 1;
-      const issAltitude = dataRaw ? dataRaw.altitude : 0; // in km
+      const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0; // in km
       const issRadius = earthRadius + (issAltitude / 6371);
-      const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
-      issMarker.position.set(pos.x, pos.y, pos.z);
-      issMarker.position.set(pos.x, pos.y, pos.z);
+      const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
+      state.issMarker.position.set(pos.x, pos.y, pos.z);
+      state.issMarker.position.set(pos.x, pos.y, pos.z);
       // Rotate the marker so that it faces the 0,0,0 point with a 90 degree local rotation on the X axis
-      issMarker.lookAt(BABYLON.Vector3.Zero(), 0, Math.PI / 2);
+      state.issMarker.lookAt(BABYLON.Vector3.Zero(), 0, Math.PI / 2);
       // Move the marker out a bit so it doesn't clip into the earth
-      issMarker.position = issMarker.position.normalize().scale(1.2);
+      state.issMarker.position = state.issMarker.position.normalize().scale(1.2);
     }
-    textBlock.text = `
+    state.textBlock.text = `
 ISS|
-LTS| ${Math.floor(timeSinceUpdate / 1000)}s
-LAT| ${issPos.latitude.toFixed(2)}
-LON| ${issPos.longitude.toFixed(2)}
-ALT| ${dataRaw ? dataRaw.altitude.toFixed(2) + " km" : 'n/a'}
-LOC| ${locName.toUpperCase()}
-DIS| ${distance.toFixed(2)} km
-DIR| ${direction.toUpperCase()}
-VEL| ${dataRaw ? dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
-TRK| ${isTracking ? "ON" : "OFF"}
+LTS| ${Math.floor(state.timeSinceUpdate / 1000)}s
+LAT| ${state.issPos.latitude.toFixed(2)}
+LON| ${state.issPos.longitude.toFixed(2)}
+ALT| ${state.dataRaw ? state.dataRaw.altitude.toFixed(2) + " km" : 'n/a'}
+LOC| ${state.locName.toUpperCase()}
+DIS| ${state.distance.toFixed(2)} km
+DIR| ${state.direction.toUpperCase()}
+VEL| ${state.dataRaw ? state.dataRaw.velocity.toFixed(2) + " km/h" : 'n/a'}
+TRK| ${state.isTracking ? "ON" : "OFF"}
 GPL| MATHIEU DOMBROCK
 `;
     light.direction = camera.position.normalize();
-    const userPos = latLongToCartesian(userLatitude, userLongitude);
+    const userPos = latLongToCartesian(state.userLatitude, state.userLongitude);
     userMarker.position = new BABYLON.Vector3(userPos.x, userPos.y, userPos.z);
     // Orient the circle to be tangent to the sphere
     userMarker.lookAt(earth.position.subtract(userMarker.position));
@@ -298,20 +316,20 @@ function updateISS() {
       const latitude = data.latitude;
       const longitude = data.longitude;
       console.log(`ISS Position - Latitude: ${latitude}, Longitude: ${longitude}`);
-      issPosLast = issPos;
-      issPos = { latitude, longitude };
-      distance = Math.sqrt(Math.pow(latitude - userLatitude, 2) + Math.pow(longitude + userLongitude, 2));
+      state.issPosLast = state.issPos;
+      state.issPos = { latitude, longitude };
+      state.distance = Math.sqrt(Math.pow(latitude - state.userLatitude, 2) + Math.pow(longitude + state.userLongitude, 2));
       // Convert distance to km (1 degree is approximately 111 km)
-      distance = distance * 111;
-      if (distance < lastDistance) {
-        direction = "away";
-      } else if (distance > lastDistance) {
-        direction = "towards";
+      state.distance = state.distance * 111;
+      if (state.distance < state.lastDistance) {
+        state.direction = "away";
+      } else if (state.distance > state.lastDistance) {
+        state.direction = "towards";
       } else {
-        direction = "???";
+        state.direction = "???";
       }
-      lastDistance = distance;
-      dataRaw = data;
+      state.lastDistance = state.distance;
+      state.dataRaw = data;
       latLongToLocation(latitude, longitude); // Update location name
     })
     .catch(error => console.error("Error fetching ISS data:", error));
@@ -322,7 +340,7 @@ function init(): void {
   setInterval(updateISS, 5000);
 
   setInterval(() => {
-    timeSinceUpdate = Date.now() - dataRaw.timestamp * 1000;
+    state.timeSinceUpdate = Date.now() - state.dataRaw.timestamp * 1000;
   }, 500);
 
   // Check if there is a city parameter in the URL
@@ -336,8 +354,8 @@ function init(): void {
     (position) => {
       console.log("User position obtained:");
       console.log(position.coords.latitude, position.coords.longitude);
-      userLatitude = position.coords.latitude;
-      userLongitude = position.coords.longitude;
+      state.userLatitude = position.coords.latitude;
+      state.userLongitude = position.coords.longitude;
     },
     (error) => {
       console.error(error);
@@ -355,11 +373,11 @@ function init(): void {
       const scene = engine.scenes[0];
       if (scene) {
         const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
-        if (camera && issPos) {
+        if (camera && state.issPos) {
           const earthRadius = 1;
-          const issAltitude = dataRaw ? dataRaw.altitude : 0;
+          const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0;
           const issRadius = earthRadius + (issAltitude / 6371);
-          const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
+          const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
           const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
 
           // Calculate spherical coordinates for the ISS position
@@ -393,11 +411,11 @@ function init(): void {
       const scene = engine.scenes[0];
       if (scene) {
         const camera = scene.activeCamera as BABYLON.ArcRotateCamera;
-        if (camera && issPos) {
+        if (camera && state.issPos) {
           const earthRadius = 1;
-          const issAltitude = dataRaw ? dataRaw.altitude : 0;
+          const issAltitude = state.dataRaw ? state.dataRaw.altitude : 0;
           const issRadius = earthRadius + (issAltitude / 6371);
-          const pos = latLongToCartesian(issPos.latitude, issPos.longitude, issRadius);
+          const pos = latLongToCartesian(state.issPos.latitude, state.issPos.longitude, issRadius);
           const target = new BABYLON.Vector3(pos.x, pos.y, pos.z);
 
           // Calculate spherical coordinates for the ISS position
